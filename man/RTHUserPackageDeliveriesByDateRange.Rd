@@ -6,6 +6,13 @@
 \usage{
 RTHUserPackageDeliveriesByDateRange(subscriptionId, fromDate, toDate)
 }
+\arguments{
+\item{subscriptionId}{id of the subscription}
+
+\item{fromDate}{fromDate}
+
+\item{toDate}{toDate}
+}
 \value{
 Returns the list of deliveries by date range
 }
