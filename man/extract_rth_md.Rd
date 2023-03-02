@@ -12,9 +12,9 @@ extract_rth_md(
   query_end_datetime = Sys.time() - 48 * 60 * 60,
   md_view = "RawMarketByPrice",
   number_of_levels = 10,
-  display_source_ric = FALSE,
+  display_source_ric = TRUE,
   result_path = fs::path_home("Downloads", sprintf(fmt = "RTH_TAS_extractum_\%i",
-    as.integer(Sys.time())), ext = "csv"),
+    as.integer(Sys.time())), ext = "csv.gz"),
   overwrite = FALSE
 )
 }
@@ -39,12 +39,10 @@ extract_rth_md(
 \item{display_source_ric}{if TRUE, the result table will have an extra
 field which indicates the underlying instrument}
 
-\item{result_path}{path of the prospective result file}
+\item{result_path}{path of the prospective result file,
+the extension must be ".csv.gz"}
 
 \item{overwrite}{should overwrite existing result file TRUE/FALSE}
-
-\item{appl_corr_and_canc}{if TRUE, the result table will display the
-original and the corrected values as well}
 }
 \value{
 The result format is the native/raw result from the
