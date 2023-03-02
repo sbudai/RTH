@@ -7,14 +7,15 @@
 poll_async_status(
   monitor_url,
   result_path = fs::path_home("Downloads", sprintf(fmt = "RTH_extractum_\%i",
-    as.integer(Sys.time())), ext = "csv"),
+    as.integer(Sys.time())), ext = "csv.gz"),
   overwrite = FALSE
 )
 }
 \arguments{
 \item{monitor_url}{the monitor URL}
 
-\item{result_path}{path of the prospective result file}
+\item{result_path}{path of the prospective result file,
+the extension must be ".csv.gz"}
 
 \item{overwrite}{should overwrite existing result file TRUE/FALSE}
 }
