@@ -1,249 +1,820 @@
-
-.RTHGetAllPages <- function(url) {
-  token <- get("token", envir = cacheEnv)
-  r <- httr::GET(url, httr::add_headers(prefer = "respond-async", Authorization = token))
-  httr::stop_for_status(r)
-  rc <- httr::content(r, "parsed", "application/json", encoding = "UTF-8")
-  # Check if there is a next link
-  if (!is.null(rc[["@odata.nextlink"]])) {
-    # Call the function again, using next link.
-    nurl <- rc[["@odata.nextlink"]]
-    b <- .RTHGetAllPages(nurl)
-    # Merge the result
-    for (i in 1:length(b[["value"]])) {
-      rc[["value"]][[length(rc[["value"]]) + 1]] <- b[["value"]][[i]]
-    }
-  }
-  # Remove next link to avoid confusion
-  rc[["@odata.nextlink"]] <- NULL
-  return(rc)
-}
-
-#' Request authentication token
-#' @param uname DSS username
-#' @param pword DSS password
-#' 
-#' @return An authentication token that must be applied to all requests
-#' 
+#' Request and cache authentication token
+#'
+#' @param uname Refinitiv Tick History DataScope Select username
+#' @param pword Refinitiv Tick History DataScope Select password
+#'
+#' @return An authentication token invisibly and cache it for further usage.
+#'
 #' @export
-RTHLogin <- function(uname, pword) {
-  cacheEnv <- new.env()
-  url <- "https://selectapi.datascope.refinitiv.com/RestApi/v1/Authentication/RequestToken"
-  b <- list(Credentials = list(Username = jsonlite::unbox(uname), Password = jsonlite::unbox(pword)))
-  r <- httr::POST(url, httr::add_headers(prefer = "respond-async"), httr::content_type_json(), body = b, encode = "json")
-  httr::stop_for_status(r)
-  rc <- httr::content(r, as = "parsed", type = "application/json", encoding = "UTF-8")
-  token <- sprintf(fmt = "Token %s", rc$value)
-  RTHSetToken(token)
-  return(invisible(token))
+get_token <- function(
+    uname = Sys.getenv("rth_dss_username"),
+    pword = Sys.getenv("rth_dss_password")) {
+  stopifnot("Valid RTH DSS username is not provided!" = uname != "")
+  stopifnot("Valid RTH DSS password is not provided!" = pword != "")
+  suf <- "Authentication/RequestToken"
+  url <- sprintf(fmt = get(x = "api", envir = cache_env), suf)
+  body <- list(
+    Credentials = list(
+      Username = jsonlite::unbox(uname),
+      Password = jsonlite::unbox(pword)
+    )
+  )
+  res <- httr::POST(url,
+    httr::add_headers(prefer = "respond-async"),
+    httr::content_type_json(),
+    body = jsonlite::toJSON(body),
+    encode = "json"
+  )
+  httr::stop_for_status(res)
+  resc <- httr::content(
+    res,
+    as = "parsed",
+    type = "application/json",
+    encoding = "UTF-8"
+  )
+  assign(
+    "token",
+    value = sprintf(fmt = "Token %s", resc$value),
+    envir = cache_env
+  )
+  message(
+    "The requested new token has cached."
+  )
+  invisible(cache_env$token)
 }
 
-#' Set authentication token
-#' @param token authentication token
-#' 
+
+#' Retrieves user information
+#' @param uname Refinitiv Tick History DataScope Select username
+#'
+#' @return Return list of UserId, UserName, Email and Phone
+#'
 #' @export
-RTHSetToken <- function(token) {
-  assign("token", value = token, envir = cacheEnv)
+get_user_info <- function(uname = Sys.getenv("rth_dss_username")) {
+  stopifnot("Valid RTH DSS username is not provided!" = uname != "")
+  suf <- sprintf(fmt = "Users/Users(%s)", uname)
+  url <- sprintf(fmt = get(x = "api", envir = cache_env), suf)
+  res <- httr::GET(
+    url,
+    httr::add_headers(
+      prefer = "respond-async",
+      Authorization = get("token", envir = cache_env)
+    )
+  )
+  httr::stop_for_status(res)
+  resc <- httr::content(
+    res,
+    as = "parsed",
+    type = "application/json",
+    encoding = "UTF-8"
+  )
+  resc$`@odata.context` <- NULL
+  purrr::compact(resc) |> tibble::as_tibble()
 }
 
-#' Retrieves a single User information.
-#' @param uname DSS username
-#' 
-#' @return Return list of ID, Name, Phone, and Email
-#' 
+
+#' Retrieves all Subscriptions of the Authorized User.
+#'
+#' @return Returns Collection of all Subscriptions
+#'
 #' @export
-RTHUserInfo <- function(uname) {
-  url <- sprintf(fmt = "https://selectapi.datascope.refinitiv.com/RestApi/v1/Users/Users(%s)", uname)
-  token <- get("token", envir = cacheEnv)
-  r <- httr::GET(url, httr::add_headers(prefer = "respond-async", Authorization = token))
-  httr::stop_for_status(r)
-  httr::content(r, "parsed", "application/json", encoding = "UTF-8")
+get_all_subscriptions <- function() {
+  suf <- "StandardExtractions/Subscriptions"
+  url <- sprintf(fmt = get(x = "api", envir = cache_env), suf)
+  res <- httr::GET(
+    url,
+    httr::add_headers(
+      prefer = "respond-async",
+      Authorization = get("token", envir = cache_env)
+    )
+  )
+  httr::stop_for_status(res)
+  resc <- httr::content(
+    res,
+    as = "parsed",
+    type = "application/json",
+    encoding = "UTF-8"
+  )
+  purrr::map_dfr(
+    purrr::pluck(resc, "value"),
+    ~ purrr::compact(.x) |>
+      unlist() |>
+      t() |>
+      tibble::as_tibble()
+  )
 }
 
-#' Retrieve the list of all user packages, i.e. packages to which I am entitled (for all subscriptions)
-#' @return Return the list of user package Id, user package name and the corresponding subscription name
-#' 
+
+#' Retrieve the user's quota information
+#'
+#' Quota limitations apply at the client level.
+#' All the users pertaining to a client have the same quota restrictions.
+#'
+#' @return Returns the quota summary for the logged in user.
+#'
 #' @export
-RTHUserPackages <- function() {
-  url <- "https://selectapi.datascope.refinitiv.com/RestApi/v1/StandardExtractions/UserPackages"
-  .RTHGetAllPages(url)
+get_quota_info <- function() {
+  suf <- "Quota/GetQuotaInformation"
+  url <- sprintf(fmt = get(x = "api", envir = cache_env), suf)
+  resc <- get_all_pages(url)
+  purrr::pluck(resc, "value") |>
+    purrr::compact() |>
+    unlist() |>
+    t() |>
+    tibble::as_tibble()
 }
 
-#' List all user package deliveries (data files) for one package.
-#' @param PackageId User package Id. Usually from RTHUserPackages()
-#' 
-#' @return Return the list of user package delivery Id
-#' 
+
+#' Retrieve the authorized and extracted RIC list
+#'
+#' If the quota service sees a new RIC,
+#' it gets added to the authorized list,
+#' unless the cummulative quota has been reached for that asset class
+#'
+#' @return Returns the RIC list that the user is authorized to use.
+#'
 #' @export
-RTHUserPackageDeliveriesByPackageId <- function(packageId) {
-  url <- sprintf(fmt = "https://selectapi.datascope.refinitiv.com/RestApi/v1/StandardExtractions/UserPackageDeliveryGetUserPackageDeliveriesByPackageId(PackageId='%s')", packageId)
-  .RTHGetAllPages(url)
+get_ric_list <- function(category_code = "Futures") {
+  suf <- sprintf(
+    fmt = "Quota/GetAuthorizedRicList(CategoryCode='%s')",
+    category_code
+  )
+  url <- sprintf(fmt = get(x = "api", envir = cache_env), suf)
+  resc <- get_all_pages(url)
+  purrr::map_dfr(
+    purrr::pluck(resc, "value"),
+    ~ purrr::compact(.x) |>
+      unlist() |>
+      t() |>
+      tibble::as_tibble()
+  )
 }
 
-#' List all user package deliveries (data files) for one package.
-#' @param subscriptionId id of the subscription
-#' @param fromDate fromDate
-#' @param toDate toDate
-#' 
-#' @return Returns the list of deliveries by date range
-#' 
+
+#' Retrieve the active jobs
+#'
+#' @return Returns the in flight jobs for all asynchronous requests.
+#'
 #' @export
-RTHUserPackageDeliveriesByDateRange <- function(subscriptionId, fromDate, toDate) {
-  url <- sprintf(fmt = "https://selectapi.datascope.refinitiv.com/RestApi/v1/StandardExtractions/UserPackageDeliveryGetUserPackageDeliveriesByDateRange(SubscriptionId='%s,FromDate=%s,ToDate=%s')", subscriptionId, fromDate, toDate)
-  .RTHGetAllPages(url)
+get_active_jobs <- function() {
+  suf <- "Jobs/JobGetActive"
+  url <- sprintf(fmt = get(x = "api", envir = cache_env), suf)
+  resc <- get_all_pages(url)
+  purrr::map_dfr(
+    purrr::pluck(resc, "value"),
+    ~ purrr::compact(.x) |>
+      unlist() |>
+      t() |>
+      tibble::as_tibble()
+  )
 }
 
-#' Get the user package delivery and save it to disk
-#' @param packageDeliveryId User package delivery Id
-#' @param path Path to content to.
-#' @param overwrite Will only overwrite ex
-#' 
+
+#' Retrieve the completed jobs
+#'
+#' @return Returns the ready jobs for all asynchronous requests.
+#'
 #' @export
-RTHGetUserPackageDeliveries <- function(packageDeliveryId, path, overwrite = FALSE, aws = FALSE) {
-  url <- sprintf(fmt = "https://selectapi.datascope.refinitiv.com/RestApi/v1/StandardExtractions/UserPackageDeliveries('%s')/$value", packageDeliveryId)
-  token <- get("token", envir = cacheEnv)
-  r <- httr::GET(url, httr::add_headers(prefer = "respond-async", Authorization = token), if (aws) {
-    httr::add_headers("X-Direct-Download" = "true")
-  }, httr::config(http_content_decoding = 0, followlocation = 0), httr::write_disk(path, overwrite), httr::progress())
-  if (httr::status_code(r) == 302) {
-    r2 <- httr::GET(r$headers$location, httr::add_headers(prefer = "respond-async"), httr::config(http_content_decoding = 0, followlocation = 0), httr::write_disk(path, overwrite), httr::progress())
-    httr::stop_for_status(r2)
-    return(r2)
-  }
-  httr::stop_for_status(r)
-  return(r)
+get_completed_jobs <- function() {
+  suf <- "Jobs/JobGetCompleted"
+  url <- sprintf(fmt = get(x = "api", envir = cache_env), suf)
+  resc <- get_all_pages(url)
+  purrr::map_dfr(
+    purrr::pluck(resc, "value"),
+    ~ purrr::compact(.x) |>
+      unlist() |>
+      t() |>
+      tibble::as_tibble()
+  )
 }
+
+
+#' Retrieve the extracted file details by job_id
+#'
+#' @param job_id the job ID of the extracted file
+#'
+#' @return Returns the details of the extracted file.
+#'
+#' @export
+get_extr_file_by_job_id <- function(job_id) {
+  suf <- sprintf(
+    fmt = "Extractions/ExtractedFileByJobId(JobId='%s')",
+    job_id
+  )
+  url <- sprintf(fmt = get(x = "api", envir = cache_env), suf)
+  resc <- get_all_pages(url)
+  purrr::map_dfr(
+    purrr::pluck(resc, "value"),
+    ~ purrr::compact(.x) |>
+      unlist() |>
+      t() |>
+      tibble::as_tibble()
+  )
+}
+
+
+#' Retrieves the instrument lists of the authenticated user
+#'
+#' @return the instrument lists with id, name and timestamps
+#' Note that the search for the specified list name is case sensitive.
+#'
+#' @export
+get_instr_lists <- function() {
+  suf <- "Extractions/InstrumentLists"
+  url <- sprintf(fmt = get(x = "api", envir = cache_env), suf)
+  resc <- get_all_pages(url)
+  purrr::map_dfr(
+    purrr::pluck(resc, "value"),
+    ~ purrr::compact(.x) |>
+      unlist() |>
+      t() |>
+      tibble::as_tibble()
+  )
+}
+
+
+#' Retrieves the instrument list matching the specified name
+#'
+#' @param instr_list_name name of the instrument list
+#'
+#' @return the instrument with list id, name and timestamps
+#' Note that the search for the specified list name is case sensitive.
+#'
+#' @export
+get_instr_list_details <- function(instr_list_name) {
+  suf <- sprintf(
+    fmt = "Extractions/InstrumentListGetByName(ListName='%s')",
+    instr_list_name
+  )
+  url <- sprintf(fmt = get(x = "api", envir = cache_env), suf)
+  resc <- get_all_pages(url)
+  resc$`@odata.context` <- NULL
+  purrr::compact(resc) |>
+    unlist() |>
+    t() |>
+    tibble::as_tibble()
+}
+
+
+#' Retrieve the list of all packages
+#'
+#' @return Return the list of package id, subscription id,
+#' package name and description
+#'
+#' @export
+get_package_list <- function() {
+  suf <- "StandardExtractions/Packages"
+  url <- sprintf(fmt = get(x = "api", envir = cache_env), suf)
+  resc <- get_all_pages(url)
+  purrr::map_dfr(
+    purrr::pluck(resc, "value"),
+    ~ purrr::compact(.x) |>
+      unlist() |>
+      t() |>
+      tibble::as_tibble()
+  )
+}
+
 
 #' Search for historical instruments given an instrument identifier.
-#' Return instruments may be currently active, or inactive 'historical only' instruments.
-#' @param identifier Instrument identifier
-#' @param startDateTime The range's start date and time. The format is yyyy-mm-ddThh:mm:ss.sssZ
-#' @param endDateTime The range's end date and time. The format is yyyy-mm-ddThh:mm:ss.sssZ
-#' @param identifierType The type of identifier. Supported types are Ric, Isin, Cusip, Sedol. Search will look for the identifier in all supported types when not specified.
-#' @param resultsBy Determines what information is returned for each found RIC. By RIC: Returns information purely based on the RIC history. By Entity: Returns information based on the entity associated with the RIC on the end date of the Range. This will cause RIC rename history to be returned. Defaults to searching by RIC when not specified.
-#' 
-#' @export
-RTHHistoricalSearch <- function(identifier, startDateTime, endDateTime, identifierType = NULL, resultsBy = NULL) {
-  url <- "https://selectapi.datascope.refinitiv.com/RestApi/v1/Search/HistoricalSearch"
-  b <- list(
-    Request = list(
-      Identifier = identifier,
-      Range = list(
-        Start = startDateTime,
-        End = endDateTime
-      )
-    )
-  )
-  identifierTypeArg <- match.arg(identifierType, c(NULL, "Ric", "Isin", "Cusip", "Sedol"))
-  if (!is.null(identifierType)) {
-    b[["Request"]][["IdentifierType"]] <- jsonlite::unbox(identifierTypeArg)
-  }
-  resultsByArg <- match.arg(resultsBy, c(NULL, "Ric", "Entity"))
-  if (!is.null(identifierType)) {
-    b[["Request"]][["ResultsBy"]] <- jsonlite::unbox(resultsByArg)
-  }
-  token <- get("token", envir = cacheEnv)
-  r <- httr::POST(url, httr::add_headers(prefer = "respond-async", Authorization = token), httr::content_type_json(), body = b, encode = "json")
-  httr::warn_for_status(r)
-  httr::content(r, "parsed", "application/json", encoding = "UTF-8")
-}
-
-#' Retrieve FID reference history events for a set of RICs in a specified date range.
-#' Returns Collection Of ReferenceHistoryResult
-#' @param ricList The RIC identifiers to return reference history for.
-#' @param startDateTime The range's start date and time. The format is yyyy-mm-ddThh:mm:ss.sssZ
-#' @param endDateTime The range's end date and time. The format is yyyy-mm-ddThh:mm:ss.sssZ
-#' 
-#' @export
-RTHReferenceHistory <- function(ricList, startDateTime, endDateTime) {
-  url <- "https://selectapi.datascope.refinitiv.com/RestApi/v1/Search/ReferenceHistory"
-  b <- list(
-    Request = list(
-      Rics = ricList,
-      Range = list(
-        Start = jsonlite::unbox(startDateTime),
-        End = jsonlite::unbox(endDateTime)
-      )
-    )
-  )
-  b <- jsonlite::toJSON(b)
-  token <- get("token", envir = cacheEnv)
-  r <- httr::POST(url, httr::add_headers(prefer = "respond-async", Authorization = token), httr::content_type_json(), body = b)
-  httr::warn_for_status(r)
-  httr::content(r, "parsed", "application/json", encoding = "UTF-8")
-}
-
-#' Returns a list of valid ContentFieldTypes for the report template type.
-#' @param reportTemplateTypes Available template type for RTH are "TickHistoryTimeAndSales","TickHistoryMarketDepth", and "TickHistoryIntradaySummaries".
-#' 
-#' @export
-RTHGetValidContentFieldTypes <- function(reportTemplateTypes = c("TickHistoryTimeAndSales", "TickHistoryMarketDepth", "TickHistoryIntradaySummaries")) {
-  reportTemplateTypesArg <- match.arg(reportTemplateTypes)
-  url <- sprintf(fmt = "https://selectapi.datascope.refinitiv.com/RestApi/v1/Extractions/GetValidContentFieldTypes(ReportTemplateType=DataScope.Select.Api.Extractions.ReportTemplates.ReportTemplateTypes'%s')", reportTemplateTypesArg)
-  token <- get("token", envir = cacheEnv)
-  r <- httr::GET(url, httr::add_headers(prefer = "respond-async", Authorization = token))
-  httr::stop_for_status(r)
-  httr::content(r, "parsed", "application/json", encoding = "UTF-8")
-}
-
-RTHRawExtractionResults <- function(jobId, path, overwrite = TRUE) {
-  url <- sprintf(fmt = "https://selectapi.datascope.refinitiv.com/RestApi/v1/Extractions/RawExtractionResults('%s')/$value", jobId)
-  token <- get("token", envir = cacheEnv)
-  r <- httr::GET(url, httr::add_headers(prefer = "respond-async", Authorization = token), httr::config(http_content_decoding = 0), httr::write_disk(path, overwrite), httr::progress())
-  httr::stop_for_status(r)
-  return(r)
-}
-
-#' Performs an on demand extraction returning the raw results as a stream if the response is available in a short amount of time,
-#' otherwise the server accepted the extracting and response with a monitor URL.
-#' In the later case, You must poll the extraction status with RTHCheckRequestStatus.
 #'
-#' The result format is the native/raw result from the underlying extractor (usually csv).
-#' @param b JSON request body. See REST API Reference Tree for format.
-#' @param path Path to content to.
-#' @param overwrite Will only overwrite existing path if TRUE.
-#' 
+#' @param identifier Instrument identifier
+#' @param identifier_type The type of identifier.
+#' Supported types are ChainRIC, RIC, ISIN, CUSIP, SEDOL.
+#' Search will look for the identifier in all supported
+#' types when not specified.
+#' @param start_datetime The range's start date and time in POSIXct format.
+#' @param end_datetime The range's end date and time in POSIXct format.
+#' @param results_by Determines what information is returned
+#' for each found RIC.
+#' "Ric": Returns information purely based on the RIC history.
+#' "Entity": Returns information based on the entity associated
+#' with the "RIC" on the end date of the range.
+#' This will cause RIC rename history to be returned.
+#' Defaults to "Ric".
+#'
+#' @return Return instruments may be currently active, or inactive
+#' 'historical only' instruments.
+#'
 #' @export
-RTHExtractRaw <- function(b, path, overwrite = FALSE) {
-  url <- "https://selectapi.datascope.refinitiv.com/RestApi/v1/Extractions/ExtractRaw"
-  token <- get("token", envir = cacheEnv)
-  r <- httr::POST(url, httr::add_headers(prefer = "respond-async", Authorization = token), httr::content_type_json(), body = b, encode = "json")
-  if (httr::status_code(r) == 202) {
-    message("The request has been accepted but has not yet completed executing asynchronously.\r\nReturn monitor URL\r\n", r$headers$location)
-    return(invisible(r$headers$location))
-  } else if (httr::status_code(r) == 200) {
-    rc <- httr::content(r, "parsed", "application/json", encoding = "UTF-8")
-    message(rc$Notes)
-    return(RTHRawExtractionResults(rc$JobId, path, overwrite))
+historical_search <- function(
+    identifier = "0#N1BM:",
+    identifier_type = "ChainRIC",
+    start_datetime = Sys.time() - 72 * 60 * 60,
+    end_datetime = Sys.time(),
+    results_by = "Ric") {
+  suf <- "Search/HistoricalSearch"
+  url <- sprintf(fmt = get(x = "api", envir = cache_env), suf)
+  identifier_type_arg <- match.arg(
+    arg = identifier_type,
+    choices = c(NULL, "ChainRIC", "RIC", "ISIN", "CUSIP", "SEDOL")
+  )
+  body <- list(
+    Request = list(
+      Identifier = jsonlite::unbox(identifier),
+      IdentifierType = jsonlite::unbox(identifier_type_arg),
+      Range = list(
+        Start = jsonlite::unbox(req_posixct_format(start_datetime)),
+        End = jsonlite::unbox(req_posixct_format(end_datetime))
+      )
+    )
+  )
+  res <- httr::POST(url,
+    httr::add_headers(
+      prefer = "respond-async",
+      Authorization = get("token", envir = cache_env)
+    ),
+    httr::content_type_json(),
+    body = jsonlite::toJSON(body),
+    encode = "json",
+    httr::progress()
+  )
+  httr::warn_for_status(res)
+  resc <- httr::content(
+    res,
+    as = "parsed",
+    type = "application/json",
+    encoding = "UTF-8"
+  )
+  purrr::map_dfr(
+    purrr::pluck(resc, "value"),
+    ~ purrr::compact(.x) |>
+      unlist() |>
+      t() |>
+      tibble::as_tibble()
+  )
+}
+
+
+#' Retrieve FID reference history events for a set of RICs
+#' in a specified date range.
+#'
+#' @param ric_list the RIC identifiers to return reference history for
+#' @param start_datetime the range's start date and time in POSIXct format
+#' @param end_datetime the range's end date and time in POSIXct format
+#'
+#' @return list of ReferenceHistoryResult tables
+#'
+#' @export
+reference_history <- function(
+    ric_list = c("0#N1BM:", "0#NGMM:"),
+    start_datetime = Sys.time() - 72 * 60 * 60,
+    end_datetime = Sys.time()) {
+  suf <- "Search/ReferenceHistory"
+  url <- sprintf(fmt = get(x = "api", envir = cache_env), suf)
+  body <- list(
+    Request = list(
+      Rics = ric_list,
+      Range = list(
+        Start = jsonlite::unbox(req_posixct_format(start_datetime)),
+        End = jsonlite::unbox(req_posixct_format(end_datetime))
+      ),
+      ResultsBy = jsonlite::unbox("Entity")
+    )
+  )
+  res <- httr::POST(
+    url,
+    httr::add_headers(
+      prefer = "respond-async",
+      Authorization = get("token", envir = cache_env)
+    ),
+    httr::content_type_json(),
+    body = jsonlite::toJSON(body),
+    encode = "json",
+    httr::progress()
+  )
+  httr::warn_for_status(res)
+  resc <- httr::content(
+    res,
+    as = "parsed",
+    type = "application/json",
+    encoding = "UTF-8"
+  )
+  purrr::map(
+    purrr::pluck(resc, "value"),
+    ~ cbind(
+      .x["Ric"],
+      purrr::map_dfr(
+        purrr::pluck(.x, "HistoryEvents"),
+        tibble::as_tibble
+      )
+    )
+  )
+}
+
+
+#' Retrieve the list of valid ContentFieldTypes for the report template type.
+#'
+#' @param report_template_type Available template type for RTH are
+#' "TickHistoryTimeAndSales","TickHistoryMarketDepth",
+#' and "TickHistoryIntradaySummaries".
+#'
+#' @return Returns a list of valid content field names for
+#' the report template type.
+#'
+#' @export
+get_valid_content_field_names <- function(
+    report_template_type = "TickHistoryTimeAndSales"
+    ) {
+  report_template_type_arg <- match.arg(
+    arg = report_template_type,
+    choices = c(
+      "TickHistoryTimeAndSales",
+      "TickHistoryMarketDepth",
+      "TickHistoryIntradaySummaries"
+    )
+  )
+  suf <- sprintf(
+    fmt = "Extractions/GetValidContentFieldTypes(ReportTemplateType=%s'%s')",
+    "DataScope.Select.Api.Extractions.ReportTemplates.ReportTemplateTypes",
+    report_template_type_arg
+  )
+  url <- sprintf(fmt = get(x = "api", envir = cache_env), suf)
+  res <- httr::GET(
+    url,
+    httr::add_headers(
+      prefer = "respond-async",
+      Authorization = get("token", envir = cache_env)
+    ),
+    httr::progress()
+  )
+  httr::stop_for_status(res)
+  resc <- httr::content(
+    res,
+    as = "parsed",
+    type = "application/json",
+    encoding = "UTF-8"
+  )
+  resc <- purrr::map_dfr(
+    purrr::pluck(resc, "value"),
+    ~ purrr::compact(.x) |>
+      unlist() |>
+      t() |>
+      tibble::as_tibble()
+  )
+  attr(resc, "template_type") <- report_template_type_arg
+  return(resc)
+}
+
+
+#' Extract Tick History Time And Sales on demand
+#'
+#' If the response is available instantly, it performs an
+#' on demand extraction which returns the raw results.
+#' Otherwise the server accepts the request and provides "monitor URL".
+#' In the latter case the extraction status/end result can be polled
+#' with poll_async_status() function using the "monitor URL" as
+#' an argument.
+#'
+#' @param content_field_names set the field names of the result table
+#' @param identifier the required RIC or ChainRIC value
+#' @param identifier_type the corresponding type of the identifier
+#' @param appl_corr_and_canc if TRUE, the result table will display the
+#' original and the corrected values as well
+#' @param timestamp_in timestamps will be displayed in "GmtUtc" or
+#' "LocalExchangeTime"
+#' @param query_start_datetime the range's start date and time in POSIXct format
+#' @param query_end_datetime the range's end date and time in POSIXct format
+#' @param display_source_ric if TRUE, the result table will have an extra
+#' field which indicates the underlying instrument
+#' @param result_path path of the prospective result file
+#' @param overwrite should overwrite existing result file TRUE/FALSE
+#'
+#' @return The result format is the native/raw result from the
+#' underlying extractor (usually csv).
+#'
+#' @export
+extract_rth_tas <- function(
+    content_field_names = grep(
+      pattern = "^Trade.+(Price|Size)",
+      x = get_valid_content_field_names(
+        report_template_type = "TickHistoryTimeAndSales"
+      )$Name,
+      value = TRUE
+    ),
+    identifier = "0#TFMB:",
+    identifier_type = "ChainRIC",
+    appl_corr_and_canc = TRUE,
+    timestamp_in = "GmtUtc",
+    query_start_datetime = Sys.time() - 72 * 60 * 60,
+    query_end_datetime = Sys.time() - 48 * 60 * 60,
+    display_source_ric = TRUE,
+    result_path = fs::path_home(
+      "Downloads",
+      sprintf(
+        fmt = "RTH_TAS_extractum_%i",
+        as.integer(Sys.time())
+      ),
+      ext = "csv"
+    ),
+    overwrite = FALSE) {
+  suf <- "Extractions/ExtractRaw"
+  url <- sprintf(fmt = get(x = "api", envir = cache_env), suf)
+  body <- list(
+    ExtractionRequest = list(
+      `@odata.type` = jsonlite::unbox(
+        paste(
+          "#DataScope",
+          "Select",
+          "Api",
+          "Extractions",
+          "ExtractionRequests",
+          "TickHistoryTimeAndSalesExtractionRequest",
+          sep = "."
+        )
+      ),
+      ContentFieldNames = lapply(content_field_names, jsonlite::unbox),
+      IdentifierList = list(
+        `@odata.type` = jsonlite::unbox(
+          paste(
+            "#DataScope",
+            "Select",
+            "Api",
+            "Extractions",
+            "ExtractionRequests",
+            "InstrumentIdentifierList",
+            sep = "."
+          )
+        ),
+        InstrumentIdentifiers = list(
+          list(
+            Identifier = jsonlite::unbox(identifier),
+            IdentifierType = jsonlite::unbox(identifier_type)
+          )
+        ),
+        ValidationOptions = jsonlite::unbox(NA),
+        UseUserPreferencesForValidationOptions = jsonlite::unbox(FALSE)
+      ),
+      Condition = list(
+        MessageTimeStampIn = jsonlite::unbox(timestamp_in),
+        ApplyCorrectionsAndCancellations = jsonlite::unbox(appl_corr_and_canc),
+        ReportDateRangeType = jsonlite::unbox("Range"),
+        QueryStartDate = jsonlite::unbox(
+          req_posixct_format(query_start_datetime)
+          ),
+        QueryEndDate = jsonlite::unbox(
+          req_posixct_format(query_end_datetime)
+          ),
+        DisplaySourceRIC = jsonlite::unbox(display_source_ric)
+      )
+    )
+  )
+  res <- httr::POST(
+    url,
+    httr::add_headers(
+      prefer = "respond-async",
+      Authorization = get("token", envir = cache_env)
+    ),
+    httr::content_type_json(),
+    body = jsonlite::toJSON(body),
+    encode = "json",
+    httr::progress()
+  )
+  if (httr::status_code(res) == 202) {
+    message(
+      "The request has been accepted but not yet completed, ",
+      "executing asynchronously.\r\nmonitor URL: \r\n",
+      res$headers$location
+    )
+    return(invisible(res$headers$location))
+  } else if (httr::status_code(res) == 200) {
+    resc <- httr::content(
+      res,
+      as = "parsed",
+      type = "application/json",
+      encoding = "UTF-8"
+    )
+    message(resc$Notes)
+    return(
+      raw_extraction(
+        job_id = resc$JobId,
+        path = result_path,
+        overwrite = overwrite
+      )
+    )
   } else {
-    httr::warn_for_status(r)
-    return(httr::content(r, "parsed", "application/json", encoding = "UTF-8"))
+    httr::warn_for_status(res)
+    return(httr::content(
+      res,
+      as = "parsed",
+      type = "application/json",
+      encoding = "UTF-8"
+    ))
   }
 }
 
-#' Polling the extraction status.
-#' On Demand extraction requests are executed as soon as possible.
-#' However, There is no guarantee on the delivery time.
-#' If the previous request returned a monitor URL, RTHCheckRequestStatus must be executed until it returns the result.
-#' @param location The monitor URL.
-#' @param path Path to content to.
-#' @param overwrite Will only overwrite existing path if TRUE.
-#' 
+
+#' Extract Tick History Market Depth on demand
+#'
+#' If the response is available instantly, it performs an
+#' on demand extraction which returns the raw results.
+#' Otherwise the server accepts the request and provides "monitor URL".
+#' In the latter case the extraction status/end result can be polled
+#' with poll_async_status() function using the "monitor URL" as
+#' an argument.
+#'
+#' @param identifier the required RIC or ChainRIC value
+#' @param identifier_type the corresponding type of the identifier
+#' @param md_view market depth view, value can be:
+#' "LegacyLevel2", "NormalizedLL2", "RawMarketByOrder", "RawMarketByPrice" or
+#' "RawMarketMaker"
+#' @param number_of_levels in case of "NormalizedLL2" view, defaults to 10
+#' @param appl_corr_and_canc if TRUE, the result table will display the
+#' original and the corrected values as well
+#' @param timestamp_in timestamps will be displayed in "GmtUtc" or
+#' "LocalExchangeTime"
+#' @param query_start_datetime the range's start date and time in POSIXct format
+#' @param query_end_datetime the range's end date and time in POSIXct format
+#' @param display_source_ric if TRUE, the result table will have an extra
+#' field which indicates the underlying instrument
+#' @param result_path path of the prospective result file
+#' @param overwrite should overwrite existing result file TRUE/FALSE
+#'
+#' @return The result format is the native/raw result from the
+#' underlying extractor (usually csv).
+#'
 #' @export
-RTHCheckRequestStatus <- function(location, path, overwrite = FALSE) {
-  token <- get("token", envir = cacheEnv)
-  r <- httr::GET(location, httr::add_headers(prefer = "respond-async", Authorization = token))
-  if (httr::status_code(r) == 202) {
-    message("The request has not yet completed executing asynchronously.\r\nPlease wait a bit and check the request status again.\r\n")
-    return(invisible(r$headers$location))
-  } else if (httr::status_code(r) == 200) {
-    rc <- httr::content(r, "parsed", "application/json", encoding = "UTF-8")
-    message(rc$Notes)
-    return(RTHRawExtractionResults(rc$JobId, path, overwrite))
+extract_rth_md <- function(
+    identifier = "0#TFMB:",
+    identifier_type = "ChainRIC",
+    timestamp_in = "GmtUtc",
+    query_start_datetime = Sys.time() - 72 * 60 * 60,
+    query_end_datetime = Sys.time() - 48 * 60 * 60,
+    md_view = "RawMarketByPrice",
+    number_of_levels = 10,
+    display_source_ric = FALSE,
+    result_path = fs::path_home(
+      "Downloads",
+      sprintf(fmt = "RTH_TAS_extractum_%i", as.integer(Sys.time())),
+      ext = "csv"
+    ),
+    overwrite = FALSE) {
+  suf <- "Extractions/ExtractRaw"
+  url <- sprintf(fmt = get(x = "api", envir = cache_env), suf)
+  body <- list(
+    ExtractionRequest = list(
+      `@odata.type` = jsonlite::unbox(
+        paste(
+          "#DataScope",
+          "Select",
+          "Api",
+          "Extractions",
+          "ExtractionRequests",
+          "TickHistoryMarketDepthExtractionRequest",
+          sep = "."
+        )
+      ),
+      IdentifierList = list(
+        `@odata.type` = jsonlite::unbox(
+          paste(
+            "#DataScope",
+            "Select",
+            "Api",
+            "Extractions",
+            "ExtractionRequests",
+            "InstrumentIdentifierList",
+            sep = "."
+          )
+        ),
+        InstrumentIdentifiers = list(
+          list(
+            Identifier = jsonlite::unbox(identifier),
+            IdentifierType = jsonlite::unbox(identifier_type)
+          )
+        ),
+        ValidationOptions = jsonlite::unbox(NA),
+        UseUserPreferencesForValidationOptions = jsonlite::unbox(FALSE)
+      ),
+      Condition = list(
+        View = jsonlite::unbox(md_view),
+        MessageTimeStampIn = jsonlite::unbox(timestamp_in),
+        ReportDateRangeType = jsonlite::unbox("Range"),
+        QueryStartDate = jsonlite::unbox(
+          req_posixct_format(query_start_datetime)
+          ),
+        QueryEndDate = jsonlite::unbox(
+          req_posixct_format(query_end_datetime)
+          ),
+        DisplaySourceRIC = jsonlite::unbox(display_source_ric)
+      )
+    )
+  )
+  # in case of "NormalizedLL2" view let us set the NumberOfLevels value
+  if (md_view == "NormalizedLL2") {
+    body$ExtractionRequest$Condition$NumberOfLevels <- jsonlite::unbox(number_of_levels)
+    body$ExtractionRequest$ContentFieldNames <- lapply(
+      get_valid_content_field_names(report_template_type = "TickHistoryMarketDepth")$Name,
+      jsonlite::unbox
+    )
+  }
+  res <- httr::POST(
+    url,
+    httr::add_headers(
+      prefer = "respond-async",
+      Authorization = get("token", envir = cache_env)
+    ),
+    httr::content_type_json(),
+    body = jsonlite::toJSON(body),
+    encode = "json",
+    httr::progress()
+  )
+  if (httr::status_code(res) == 202) {
+    message(
+      "The request has been accepted but not yet completed, ",
+      "executing asynchronously.\r\nmonitor URL: \r\n",
+      res$headers$location
+    )
+    return(invisible(res$headers$location))
+  } else if (httr::status_code(res) == 200) {
+    resc <- httr::content(
+      res,
+      as = "parsed",
+      type = "application/json",
+      encoding = "UTF-8"
+    )
+    message(resc$Notes)
+    return(
+      raw_extraction(
+        job_id = resc$JobId,
+        path = result_path,
+        overwrite = overwrite
+      )
+    )
   } else {
-    warn_for_status(r)
-    return(httr::content(r, "parsed", "application/json", encoding = "UTF-8"))
+    httr::warn_for_status(res)
+    return(
+      httr::content(
+        res,
+        as = "parsed",
+        type = "application/json",
+        encoding = "UTF-8"
+        )
+      )
   }
 }
 
 
+#' Poll the asynchronous extraction status.
+#'
+#' On Demand extraction requests are executed
+#' asynchronously, which means as soon as possible.
+#' This command checks the readiness of the job
+#' and downloads the extractum if that is ready.
+#'
+#' @param monitor_url the monitor URL
+#' @param result_path path of the prospective result file
+#' @param overwrite should overwrite existing result file TRUE/FALSE
+#'
+#' @return The "monitor_url" status message and
+#' the result file downloaded, if applicable.
+#'
+#' @export
+poll_async_status <- function(
+    monitor_url,
+    result_path = fs::path_home(
+      "Downloads",
+      sprintf(
+        fmt = "RTH_extractum_%i",
+        as.integer(Sys.time())
+      ),
+      ext = "csv"
+    ),
+    overwrite = FALSE) {
+  res <- httr::GET(
+    monitor_url,
+    httr::add_headers(
+      prefer = "respond-async",
+      Authorization = get("token", envir = cache_env)
+    )
+  )
+  if (httr::status_code(res) == 202) {
+    message(
+      "The request has not completed yet, still executing asynchronously.\r\n",
+      "Please wait a bit and poll the request status again.\r\n"
+    )
+    return(invisible(res$headers$location))
+  } else if (httr::status_code(res) == 200) {
+    resc <- httr::content(
+      res,
+      as = "parsed",
+      type = "application/json",
+      encoding = "UTF-8"
+    )
+    message(resc$Notes)
+    return(
+      raw_extraction(
+        job_id = resc$JobId,
+        path = result_path,
+        overwrite = overwrite
+      )
+    )
+  } else {
+    httr::warn_for_status(res)
+    return(httr::content(
+      res,
+      as = "parsed",
+      type = "application/json",
+      encoding = "UTF-8"
+    ))
+  }
+}
