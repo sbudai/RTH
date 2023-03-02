@@ -19,7 +19,8 @@ get_token <- function(
       Password = jsonlite::unbox(pword)
     )
   )
-  res <- httr::POST(url,
+  res <- httr::POST(
+    url,
     httr::add_headers(prefer = "respond-async"),
     httr::content_type_json(),
     body = jsonlite::toJSON(body),
@@ -413,9 +414,7 @@ reference_history <- function(
 #' the report template type.
 #'
 #' @export
-get_valid_content_field_names <- function(
-    report_template_type = "TickHistoryTimeAndSales"
-    ) {
+get_valid_content_field_names <- function(report_template_type = "TickHistoryTimeAndSales") {
   report_template_type_arg <- match.arg(
     arg = report_template_type,
     choices = c(
@@ -477,7 +476,8 @@ get_valid_content_field_names <- function(
 #' @param query_end_datetime the range's end date and time in POSIXct format
 #' @param display_source_ric if TRUE, the result table will have an extra
 #' field which indicates the underlying instrument
-#' @param result_path path of the prospective result file
+#' @param result_path path of the prospective result file,
+#' the extension must be ".csv.gz"
 #' @param overwrite should overwrite existing result file TRUE/FALSE
 #'
 #' @return The result format is the native/raw result from the
@@ -505,7 +505,7 @@ extract_rth_tas <- function(
         fmt = "RTH_TAS_extractum_%i",
         as.integer(Sys.time())
       ),
-      ext = "csv"
+      ext = "csv.gz"
     ),
     overwrite = FALSE) {
   suf <- "Extractions/ExtractRaw"
@@ -551,10 +551,10 @@ extract_rth_tas <- function(
         ReportDateRangeType = jsonlite::unbox("Range"),
         QueryStartDate = jsonlite::unbox(
           req_posixct_format(query_start_datetime)
-          ),
+        ),
         QueryEndDate = jsonlite::unbox(
           req_posixct_format(query_end_datetime)
-          ),
+        ),
         DisplaySourceRIC = jsonlite::unbox(display_source_ric)
       )
     )
@@ -577,29 +577,26 @@ extract_rth_tas <- function(
       res$headers$location
     )
     return(invisible(res$headers$location))
-  } else if (httr::status_code(res) == 200) {
+  } else {
+    httr::warn_for_status(res)
     resc <- httr::content(
       res,
       as = "parsed",
       type = "application/json",
       encoding = "UTF-8"
     )
-    message(resc$Notes)
-    return(
-      raw_extraction(
-        job_id = resc$JobId,
-        path = result_path,
-        overwrite = overwrite
+    if (httr::status_code(res) == 200) {
+      message(resc$Notes)
+      return(
+        raw_extraction(
+          job_id = resc$JobId,
+          path = result_path,
+          overwrite = overwrite
+        )
       )
-    )
-  } else {
-    httr::warn_for_status(res)
-    return(httr::content(
-      res,
-      as = "parsed",
-      type = "application/json",
-      encoding = "UTF-8"
-    ))
+    } else {
+      return(resc)
+    }
   }
 }
 
@@ -619,15 +616,14 @@ extract_rth_tas <- function(
 #' "LegacyLevel2", "NormalizedLL2", "RawMarketByOrder", "RawMarketByPrice" or
 #' "RawMarketMaker"
 #' @param number_of_levels in case of "NormalizedLL2" view, defaults to 10
-#' @param appl_corr_and_canc if TRUE, the result table will display the
-#' original and the corrected values as well
 #' @param timestamp_in timestamps will be displayed in "GmtUtc" or
 #' "LocalExchangeTime"
 #' @param query_start_datetime the range's start date and time in POSIXct format
 #' @param query_end_datetime the range's end date and time in POSIXct format
 #' @param display_source_ric if TRUE, the result table will have an extra
 #' field which indicates the underlying instrument
-#' @param result_path path of the prospective result file
+#' @param result_path path of the prospective result file,
+#' the extension must be ".csv.gz"
 #' @param overwrite should overwrite existing result file TRUE/FALSE
 #'
 #' @return The result format is the native/raw result from the
@@ -642,11 +638,11 @@ extract_rth_md <- function(
     query_end_datetime = Sys.time() - 48 * 60 * 60,
     md_view = "RawMarketByPrice",
     number_of_levels = 10,
-    display_source_ric = FALSE,
+    display_source_ric = TRUE,
     result_path = fs::path_home(
       "Downloads",
       sprintf(fmt = "RTH_TAS_extractum_%i", as.integer(Sys.time())),
-      ext = "csv"
+      ext = "csv.gz"
     ),
     overwrite = FALSE) {
   suf <- "Extractions/ExtractRaw"
@@ -691,10 +687,10 @@ extract_rth_md <- function(
         ReportDateRangeType = jsonlite::unbox("Range"),
         QueryStartDate = jsonlite::unbox(
           req_posixct_format(query_start_datetime)
-          ),
+        ),
         QueryEndDate = jsonlite::unbox(
           req_posixct_format(query_end_datetime)
-          ),
+        ),
         DisplaySourceRIC = jsonlite::unbox(display_source_ric)
       )
     )
@@ -725,31 +721,26 @@ extract_rth_md <- function(
       res$headers$location
     )
     return(invisible(res$headers$location))
-  } else if (httr::status_code(res) == 200) {
+  } else {
+    httr::warn_for_status(res)
     resc <- httr::content(
       res,
       as = "parsed",
       type = "application/json",
       encoding = "UTF-8"
     )
-    message(resc$Notes)
-    return(
-      raw_extraction(
-        job_id = resc$JobId,
-        path = result_path,
-        overwrite = overwrite
-      )
-    )
-  } else {
-    httr::warn_for_status(res)
-    return(
-      httr::content(
-        res,
-        as = "parsed",
-        type = "application/json",
-        encoding = "UTF-8"
+    if (httr::status_code(res) == 200) {
+      message(resc$Notes)
+      return(
+        raw_extraction(
+          job_id = resc$JobId,
+          path = result_path,
+          overwrite = overwrite
         )
       )
+    } else {
+      return(resc)
+    }
   }
 }
 
@@ -762,7 +753,8 @@ extract_rth_md <- function(
 #' and downloads the extractum if that is ready.
 #'
 #' @param monitor_url the monitor URL
-#' @param result_path path of the prospective result file
+#' @param result_path path of the prospective result file,
+#' the extension must be ".csv.gz"
 #' @param overwrite should overwrite existing result file TRUE/FALSE
 #'
 #' @return The "monitor_url" status message and
@@ -777,7 +769,7 @@ poll_async_status <- function(
         fmt = "RTH_extractum_%i",
         as.integer(Sys.time())
       ),
-      ext = "csv"
+      ext = "csv.gz"
     ),
     overwrite = FALSE) {
   res <- httr::GET(
@@ -793,28 +785,25 @@ poll_async_status <- function(
       "Please wait a bit and poll the request status again.\r\n"
     )
     return(invisible(res$headers$location))
-  } else if (httr::status_code(res) == 200) {
+  } else {
+    httr::warn_for_status(res)
     resc <- httr::content(
       res,
       as = "parsed",
       type = "application/json",
       encoding = "UTF-8"
     )
-    message(resc$Notes)
-    return(
-      raw_extraction(
-        job_id = resc$JobId,
-        path = result_path,
-        overwrite = overwrite
+    if (httr::status_code(res) == 200) {
+      message(resc$Notes)
+      return(
+        raw_extraction(
+          job_id = resc$JobId,
+          path = result_path,
+          overwrite = overwrite
+        )
       )
-    )
-  } else {
-    httr::warn_for_status(res)
-    return(httr::content(
-      res,
-      as = "parsed",
-      type = "application/json",
-      encoding = "UTF-8"
-    ))
+    } else {
+      return(resc)
+    }
   }
 }
