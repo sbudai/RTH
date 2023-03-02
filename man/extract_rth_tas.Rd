@@ -16,7 +16,7 @@ extract_rth_tas(
   query_end_datetime = Sys.time() - 48 * 60 * 60,
   display_source_ric = TRUE,
   result_path = fs::path_home("Downloads", sprintf(fmt = "RTH_TAS_extractum_\%i",
-    as.integer(Sys.time())), ext = "csv"),
+    as.integer(Sys.time())), ext = "csv.gz"),
   overwrite = FALSE
 )
 }
@@ -40,7 +40,8 @@ original and the corrected values as well}
 \item{display_source_ric}{if TRUE, the result table will have an extra
 field which indicates the underlying instrument}
 
-\item{result_path}{path of the prospective result file}
+\item{result_path}{path of the prospective result file,
+the extension must be ".csv.gz"}
 
 \item{overwrite}{should overwrite existing result file TRUE/FALSE}
 }
