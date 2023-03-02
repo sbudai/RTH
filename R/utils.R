@@ -74,7 +74,7 @@ raw_extraction <- function(job_id, path, overwrite = TRUE) {
       prefer = "respond-async",
       Authorization = get("token", envir = cache_env)
     ),
-    httr::config(http_content_decoding = 0),
+    httr::config(http_content_decoding = 0, followlocation = 0),
     httr::write_disk(path = path, overwrite = overwrite),
     httr::progress()
   )
