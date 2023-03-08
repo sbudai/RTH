@@ -10,10 +10,10 @@ extract_rth_md(
   timestamp_in = "GmtUtc",
   query_start_datetime = Sys.time() - 72 * 60 * 60,
   query_end_datetime = Sys.time() - 48 * 60 * 60,
-  md_view = "RawMarketByPrice",
+  md_view = "NormalizedLL2",
   number_of_levels = 10,
   display_source_ric = TRUE,
-  result_path = fs::path_home("Downloads", sprintf(fmt = "RTH_TAS_extractum_\%i",
+  result_path = fs::path_home("Downloads", sprintf(fmt = "RTH_MD_extractum_\%i",
     as.integer(Sys.time())), ext = "csv.gz"),
   overwrite = FALSE
 )
@@ -21,7 +21,7 @@ extract_rth_md(
 \arguments{
 \item{identifier}{the required RIC or ChainRIC value}
 
-\item{identifier_type}{the corresponding type of the identifier}
+\item{identifier_type}{the corresponding type of the identifier ("Ric" or "ChainRIC")}
 
 \item{timestamp_in}{timestamps will be displayed in "GmtUtc" or
 "LocalExchangeTime"}
@@ -32,7 +32,7 @@ extract_rth_md(
 
 \item{md_view}{market depth view, value can be:
 "LegacyLevel2", "NormalizedLL2", "RawMarketByOrder", "RawMarketByPrice" or
-"RawMarketMaker"}
+"RawMarketMaker"; defaults to "NormalizedLL2"}
 
 \item{number_of_levels}{in case of "NormalizedLL2" view, defaults to 10}
 
