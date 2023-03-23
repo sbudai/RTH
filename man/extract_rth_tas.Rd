@@ -23,9 +23,9 @@ extract_rth_tas(
 \arguments{
 \item{content_field_names}{set the field names of the result table}
 
-\item{identifier}{the required RIC or ChainRIC value}
+\item{identifier}{the required RIC or ChainRIC value(s)}
 
-\item{identifier_type}{the corresponding type of the identifier}
+\item{identifier_type}{the corresponding type of the identifier(s)}
 
 \item{appl_corr_and_canc}{if TRUE, the result table will display the
 original and the corrected values as well}

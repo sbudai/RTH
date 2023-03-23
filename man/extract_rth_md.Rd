@@ -19,9 +19,9 @@ extract_rth_md(
 )
 }
 \arguments{
-\item{identifier}{the required RIC or ChainRIC value}
+\item{identifier}{the required RIC or ChainRIC value(s)}
 
-\item{identifier_type}{the corresponding type of the identifier ("Ric" or "ChainRIC")}
+\item{identifier_type}{the corresponding type of the identifier(s) ("Ric" or "ChainRIC")}
 
 \item{timestamp_in}{timestamps will be displayed in "GmtUtc" or
 "LocalExchangeTime"}
