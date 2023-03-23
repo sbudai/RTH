@@ -1,7 +1,7 @@
 Package: RTH
 Type: Package
 Title: Refinitiv Tick History API in R
-Version: 0.1.3
+Version: 0.1.4
 Author: Warat Boonyanit & Sandor Budai
 Maintainer: Warat Boonyanit <Warat.boonyanit@refinitiv.com>
 Description: This R package use the httr to retrieve data from Refinitiv Tick History REST APIs.
