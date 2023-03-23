@@ -466,8 +466,8 @@ get_valid_content_field_names <- function(report_template_type = "TickHistoryTim
 #' an argument.
 #'
 #' @param content_field_names set the field names of the result table
-#' @param identifier the required RIC or ChainRIC value
-#' @param identifier_type the corresponding type of the identifier
+#' @param identifier the required RIC or ChainRIC value(s)
+#' @param identifier_type the corresponding type of the identifier(s)
 #' @param appl_corr_and_canc if TRUE, the result table will display the
 #' original and the corrected values as well
 #' @param timestamp_in timestamps will be displayed in "GmtUtc" or
@@ -536,11 +536,17 @@ extract_rth_tas <- function(
             sep = "."
           )
         ),
-        InstrumentIdentifiers = list(
-          list(
-            Identifier = jsonlite::unbox(identifier),
-            IdentifierType = jsonlite::unbox(identifier_type)
-          )
+        # InstrumentIdentifiers = list(
+        #   list(
+        #     Identifier = jsonlite::unbox(identifier),
+        #     IdentifierType = jsonlite::unbox(identifier_type)
+        #   )
+        # ),
+        InstrumentIdentifiers = purrr::map2( 
+          identifier,
+          identifier_type,
+          ~list( Identifier = jsonlite::unbox(.x),
+                 IdentifierType = jsonlite::unbox(.y) )
         ),
         ValidationOptions = jsonlite::unbox(NA),
         UseUserPreferencesForValidationOptions = jsonlite::unbox(FALSE)
@@ -587,11 +593,14 @@ extract_rth_tas <- function(
     )
     if (httr::status_code(res) == 200) {
       message(resc$Notes)
-      return(
-        raw_extraction(
-          job_id = resc$JobId,
-          path = result_path,
-          overwrite = overwrite
+      return( 
+        list(
+          raw_extraction(
+            job_id = resc$JobId,
+            path = result_path,
+            overwrite = overwrite
+          ),
+          resc$Notes
         )
       )
     } else {
@@ -610,8 +619,8 @@ extract_rth_tas <- function(
 #' with poll_async_status() function using the "monitor URL" as
 #' an argument.
 #'
-#' @param identifier the required RIC or ChainRIC value
-#' @param identifier_type the corresponding type of the identifier ("Ric" or "ChainRIC")
+#' @param identifier the required RIC or ChainRIC value(s)
+#' @param identifier_type the corresponding type of the identifier(s) ("Ric" or "ChainRIC")
 #' @param md_view market depth view, value can be:
 #' "LegacyLevel2", "NormalizedLL2", "RawMarketByOrder", "RawMarketByPrice" or
 #' "RawMarketMaker"; defaults to "NormalizedLL2"
@@ -672,11 +681,17 @@ extract_rth_md <- function(
             sep = "."
           )
         ),
-        InstrumentIdentifiers = list(
-          list(
-            Identifier = jsonlite::unbox(identifier),
-            IdentifierType = jsonlite::unbox(identifier_type)
-          )
+        # InstrumentIdentifiers = list(
+        #   list(
+        #     Identifier = jsonlite::unbox(identifier),
+        #     IdentifierType = jsonlite::unbox(identifier_type)
+        #   )
+        # ),
+        InstrumentIdentifiers = purrr::map2( 
+          identifier,
+          identifier_type,
+          ~list( Identifier = jsonlite::unbox(.x),
+                 IdentifierType = jsonlite::unbox(.y) )
         ),
         ValidationOptions = jsonlite::unbox(NA),
         UseUserPreferencesForValidationOptions = jsonlite::unbox(FALSE)
@@ -732,10 +747,13 @@ extract_rth_md <- function(
     if (httr::status_code(res) == 200) {
       message(resc$Notes)
       return(
-        raw_extraction(
-          job_id = resc$JobId,
-          path = result_path,
-          overwrite = overwrite
+        list(
+          raw_extraction(
+            job_id = resc$JobId,
+            path = result_path,
+            overwrite = overwrite
+          ),
+          resc$Notes
         )
       )
     } else {
@@ -795,11 +813,14 @@ poll_async_status <- function(
     )
     if (httr::status_code(res) == 200) {
       message(resc$Notes)
-      return(
-        raw_extraction(
-          job_id = resc$JobId,
-          path = result_path,
-          overwrite = overwrite
+      return( 
+        list(
+          raw_extraction(
+            job_id = resc$JobId,
+            path = result_path,
+            overwrite = overwrite
+          ),
+          resc$Notes
         )
       )
     } else {
